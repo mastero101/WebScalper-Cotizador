@@ -118,66 +118,21 @@ const scrapingMethods = {
   },
   
   Amazon: async (url) => {
-    let browser = null;
-    
     try {
-      browser = await puppeteer.launch({
-        headless: "new",
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage'
-        ]
-      });
-      
-      const page = await browser.newPage();
-      await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      
-      // Interceptar recursos innecesarios
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-          req.abort();
-        } else {
-          req.continue();
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
       });
       
-      await page.goto(url, { 
-        waitUntil: 'networkidle0', 
-        timeout: 10000 
-      });
+      const $ = cheerio.load(response.data);
+      const priceText = $(".a-price-whole").text();
+      const priceValues = priceText.split('.');
+      const firstPriceValue = priceValues[0];
+      const price = firstPriceValue.replace(/[,$]/g, '');
       
-      // Esperar a que aparezca al menos uno de los selectores de precio
-      const priceSelectors = [
-        '.reinventPricePriceToPayMargin .a-price-whole',
-        '.priceToPay .a-price-whole',
-        '.a-price[data-a-color="base"] .a-price-whole',
-        '#corePriceDisplay_desktop_feature_div .a-price-whole',
-        '.a-price.aok-align-center .a-price-whole'
-      ];
-      
-      // Intentar encontrar los precios
-      const prices = await page.evaluate((selectors) => {
-        const results = [];
-        for (const selector of selectors) {
-          const elements = document.querySelectorAll(selector);
-          elements.forEach(el => {
-            if (el && el.textContent) {
-              results.push(el.textContent.trim());
-            }
-          });
-        }
-        return results;
-      }, priceSelectors);
-      
-      // Procesar los precios encontrados
-      for (const priceText of prices) {
-        const price = priceText.replace(/[,$\.]/g, '');
-        if (price && !isNaN(price) && price.length > 2) {
-          return price;
-        }
+      if (price && !isNaN(price)) {
+        return price;
       }
       
       throw new Error('Precio no encontrado');
@@ -185,10 +140,6 @@ const scrapingMethods = {
     } catch (error) {
       console.error(`Error en Amazon scraping: ${error.message}`);
       throw error;
-    } finally {
-      if (browser) {
-        await browser.close();
-      }
     }
   }
 };
@@ -293,7 +244,9 @@ async function actualizarPrecios(conn) {
     for (const [tienda, items] of Object.entries(componentesPorTienda)) {
       console.log(`Procesando tienda: ${tienda} (${items.length} items)`);
       
-      if (['Pcel', 'Aliexpress', 'Amazon'].includes(tienda)) {
+      if (tienda === 'Amazon') {
+        await procesarConAxios(items, tienda, conn);
+      } else if (['Pcel', 'Aliexpress'].includes(tienda)) {
         await procesarConCluster(items, tienda, conn);
       } else if (tienda === 'Cyberpuerta') {
         await procesarConAxios(items, tienda, conn);
