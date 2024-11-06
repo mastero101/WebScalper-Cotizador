@@ -58,7 +58,7 @@ const scrapingMethods = {
       
       await page.goto(url, { 
         waitUntil: 'networkidle0', 
-        timeout: 5000 
+        timeout: 10000 
       });
       
       await page.waitForSelector('div.vatprice_top strong');
@@ -100,7 +100,7 @@ const scrapingMethods = {
       
       await page.goto(url, { 
         waitUntil: 'networkidle0', 
-        timeout: 5000 
+        timeout: 10000 
       });
       
       await page.waitForSelector('.price--currentPriceText--V8_y_b5', { timeout: 5000 });
