@@ -226,20 +226,45 @@ const scrapingMethods = {
     }
   },
   
-  Ddtech: async (url) => {
+  Ddtech: async (url, page) => {
+    let browser = null;
+    let ownPage = page;
+    
     try {
-      const response = await axios.get(url, { 
-        timeout: 15000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+      if (!ownPage) {
+        browser = await puppeteer.launch({
+          headless: "new",
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        ownPage = await browser.newPage();
+      }
+      
+      await ownPage.setViewport({ width: 1280, height: 720 });
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+        throw new Error('URL inválida o vacía');
+      }
+
+      await ownPage.goto(url, { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 45000 
       });
-      const $ = cheerio.load(response.data);
-      // DDTECH usa comúnmente estas clases para el precio (actualizado para .price-box .price)
-      const priceText = $(".price-box .price, .product-info-price .price, .product-price, #form-p-price").first().text().trim();
-      return priceText.replace(/[$,]/g, '').split('.')[0];
+      
+      // Selector actualizado para DDtech basado en feedback
+      const priceSelector = '.price-box .price, .product-info-price .price, .product-price, #form-p-price';
+      await ownPage.waitForSelector(priceSelector, { timeout: 20000 });
+      
+      const priceText = await ownPage.$eval(priceSelector, el => el.textContent.trim());
+      const price = priceText.replace(/[$,]/g, '').split('.')[0];
+      
+      return price;
     } catch (error) {
       throw error;
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
     }
   },
 
@@ -454,3 +479,16 @@ async function actualizarPrecios() {
     process.exit(0);
   }
 })();
+
+// Manejadores de errores globales para evitar cierres inesperados sin info
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('--- EXCEPCIÓN NO CONTROLADA (Promesa) ---');
+  console.error('Razón:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('--- ERROR CRÍTICO DEL SISTEMA ---');
+  console.error(err);
+  // En errores críticos de sistema, cerramos pool y salimos tras loggear
+  pool.end(() => process.exit(1));
+});
