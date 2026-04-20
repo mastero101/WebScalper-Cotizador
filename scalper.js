@@ -340,8 +340,8 @@ async function procesarConLimite(items, tienda, limite = 15) {
 // Función para procesar tiendas que usan Puppeteer
 async function procesarConCluster(items, tienda) {
   const cluster = await Cluster.launch({
-    concurrency: Cluster.CONCURRENCY_BROWSER,
-    maxConcurrency: 5, // Bajado a 5 para mayor estabilidad
+    concurrency: Cluster.CONCURRENCY_PAGE, // Usar pestañas en lugar de procesos independientes para ahorrar CPU/RAM
+    maxConcurrency: 2, // Reducido a 2 para proteger el hardware (ideal para N95/MiniPCs)
     puppeteerOptions: {
       headless: "new",
       args: [
@@ -351,13 +351,16 @@ async function procesarConCluster(items, tienda) {
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
         '--disable-blink-features=AutomationControlled',
-        '--window-size=1920,1080'
+        '--window-size=1280,720' // Tamaño reducido para menor consumo
       ]
     },
-    timeout: 90000 // Tiempo total de tarea aumentado
+    timeout: 120000 
   });
 
   await cluster.task(async ({ page, data: componente }) => {
+    // Pequeño respiro entre tareas para no estresar el CPU
+    await new Promise(r => setTimeout(r, 500));
+    
     try {
       // Pasamos la página del cluster al método de scraping para reutilizar el navegador
       const price = await scrapingMethods[tienda](componente.url, page);
@@ -394,32 +397,29 @@ async function actualizarPrecios() {
       return acc;
     }, {});
 
-    // Procesar tiendas en paralelo con inicio escalonado (staggered)
-    const storePromises = Object.entries(componentesPorTienda).map(async ([tienda, items], index) => {
-      // Esperar un poco antes de iniciar cada tienda para no saturar al arranque
-      await new Promise(r => setTimeout(r, index * 2000));
-      
-      console.log(`Iniciando procesamiento de tienda: ${tienda} (${items.length} items)`);
+    // Procesar tiendas de forma SECUENCIAL para no sobrecalentar el CPU
+    for (const [tienda, items] of Object.entries(componentesPorTienda)) {
+      console.log(`\n--- Iniciando procesamiento de tienda: ${tienda} (${items.length} items) ---`);
       
       try {
-        if (['Amazon', 'Pcel', 'Aliexpress', 'Cyberpuerta'].includes(tienda)) {
+        if (['Amazon', 'Pcel', 'Aliexpress', 'Cyberpuerta', 'Ddtech'].includes(tienda)) {
           await procesarConCluster(items, tienda);
         } else if (scrapingMethods[tienda]) {
-          // Si existe el método pero no es Puppeteer (ej. Ddtech)
-          await procesarConLimite(items, tienda, 10);
+          // Si existe el método pero no es Puppeteer
+          await procesarConLimite(items, tienda, 5);
         } else {
           // Fallback para tiendas sin método definido
           console.log(`Tienda ${tienda} no tiene método específico, usando scraper genérico...`);
-          await procesarConLimite(items, 'Default', 5);
+          await procesarConLimite(items, 'Default', 3);
         }
       } catch (error) {
         console.error(`Error procesando tienda ${tienda}:`, error.message);
       }
       
       console.log(`Finalizado procesamiento de tienda: ${tienda}`);
-    });
-
-    await Promise.all(storePromises);
+      // Esperar 3 segundos entre tiendas para que el CPU se enfríe
+      await new Promise(r => setTimeout(r, 3000));
+    }
   } catch (error) {
     console.error("Error en el proceso principal:", error);
   }
