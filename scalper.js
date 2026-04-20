@@ -5,8 +5,9 @@ const cheerio = require("cheerio");
 const puppeteer = require('puppeteer');
 const { Cluster } = require('puppeteer-cluster');
 
-// Configurar la conexión a la base de datos
-const connection = mysql.createConnection({
+// Configurar el pool de conexión a la base de datos para mejor rendimiento
+const pool = mysql.createPool({
+  connectionLimit: 10,
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -15,10 +16,10 @@ const connection = mysql.createConnection({
   ssl: process.env.DB_SSL === 'true'
 });
 
-// Convertir query a Promise
-const queryAsync = (connection, sql, values) => {
+// Convertir query a Promise usando el pool
+const queryAsync = (sql, values) => {
   return new Promise((resolve, reject) => {
-    connection.query(sql, values, (error, results) => {
+    pool.query(sql, values, (error, results) => {
       if (error) reject(error);
       else resolve(results);
     });
@@ -27,43 +28,36 @@ const queryAsync = (connection, sql, values) => {
 
 // Funciones de scraping específicas por tienda
 const scrapingMethods = {
-  Cyberpuerta: async (url) => {
-    const response = await axios.get(url);
-    const $ = cheerio.load(response.data);
-    const priceText = $(".priceText").text().trim();
-    return priceText.replace('$', '').replace(',', '');
-  },
-  
-  Pcel: async (url) => {
+  Cyberpuerta: async (url, page) => {
     let browser = null;
+    let ownPage = page;
     
     try {
-      browser = await puppeteer.launch({
-        headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      if (!ownPage) {
+        browser = await puppeteer.launch({
+          headless: "new",
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        ownPage = await browser.newPage();
+      }
+      
+      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+        throw new Error('URL inválida o vacía');
+      }
+
+      await ownPage.goto(url, { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 45000 
       });
       
-      const page = await browser.newPage();
-      await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      // Selectores comunes para precio en Cyberpuerta (incluyendo el nuevo formato de h2)
+      const priceSelector = '.priceText, span.price, .detailsInfo .price, h2.cp-text--heading-1';
+      await ownPage.waitForSelector(priceSelector, { timeout: 20000 });
       
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet') {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
-      
-      await page.goto(url, { 
-        waitUntil: 'networkidle0', 
-        timeout: 10000 
-      });
-      
-      await page.waitForSelector('div.vatprice_top strong');
-      
-      const priceText = await page.$eval('div.vatprice_top strong', el => el.textContent.trim());
+      const priceText = await ownPage.$eval(priceSelector, el => el.textContent.trim());
       const price = priceText.replace(/[$,]/g, '').split('.')[0];
       
       return price;
@@ -76,36 +70,51 @@ const scrapingMethods = {
     }
   },
   
-  Aliexpress: async (url) => {
+  Pcel: async (url, page) => {
     let browser = null;
+    let ownPage = page;
     
     try {
-      browser = await puppeteer.launch({
-        headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      });
+      if (!ownPage) {
+        browser = await puppeteer.launch({
+          headless: "new",
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        ownPage = await browser.newPage();
+      }
       
-      const page = await browser.newPage();
-      await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+      // Solo habilitar si no estaba habilitado antes (evitar errores de doble activación)
+      try { await ownPage.setRequestInterception(true); } catch (e) {}
+      
+      const requestHandler = (req) => {
+        if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet') {
           req.abort();
         } else {
           req.continue();
         }
+      };
+      
+      ownPage.on('request', requestHandler);
+      
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+        throw new Error('URL inválida o vacía');
+      }
+
+      await ownPage.goto(url, { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 20000 
       });
       
-      await page.goto(url, { 
-        waitUntil: 'networkidle0', 
-        timeout: 10000 
-      });
+      await ownPage.waitForSelector('div.vatprice_top strong', { timeout: 10000 });
       
-      await page.waitForSelector('.price--currentPriceText--V8_y_b5', { timeout: 5000 });
-      const priceText = await page.$eval('.price--currentPriceText--V8_y_b5', el => el.textContent.trim());
-      const price = priceText.replace(/[MX$,\s]/g, '').split('.')[0];
+      const priceText = await ownPage.$eval('div.vatprice_top strong', el => el.textContent.trim());
+      const price = priceText.replace(/[$,]/g, '').split('.')[0];
+      
+      // Limpiar el listener para no interferir con otros usos de la misma página si viene de un cluster
+      ownPage.off('request', requestHandler);
       
       return price;
     } catch (error) {
@@ -117,9 +126,139 @@ const scrapingMethods = {
     }
   },
   
-  Amazon: async (url) => {
+  Aliexpress: async (url, page) => {
+    let browser = null;
+    let ownPage = page;
+    
+    try {
+      if (!ownPage) {
+        browser = await puppeteer.launch({
+          headless: "new",
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        ownPage = await browser.newPage();
+      }
+      
+      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      try { await ownPage.setRequestInterception(true); } catch (e) {}
+      
+      const requestHandler = (req) => {
+        if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      };
+      
+      ownPage.on('request', requestHandler);
+      
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+        throw new Error('URL inválida o vacía');
+      }
+
+      await ownPage.goto(url, { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 40000 
+      });
+      
+      // Uso de selector parcial para Aliexpress ya que las clases cambian frecuentemente
+      const priceSelector = '[class*="price--currentPriceText"], .product-price-value, .price--priceText--, .current-price';
+      await ownPage.waitForSelector(priceSelector, { timeout: 30000 });
+      
+      const priceText = await ownPage.$eval(priceSelector, el => el.textContent.trim());
+      // Limpiar texto de forma más robusta
+      const price = priceText.replace(/[MX$,\s\u00A0]/g, '').replace(',', '.').split('.')[0];
+      
+      ownPage.off('request', requestHandler);
+      
+      return price;
+    } catch (error) {
+      throw error;
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  },
+  
+  Amazon: async (url, page) => {
+    let browser = null;
+    let ownPage = page;
+    
+    try {
+      if (!ownPage) {
+        browser = await puppeteer.launch({
+          headless: "new",
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        ownPage = await browser.newPage();
+      }
+      
+      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+        throw new Error('URL inválida o vacía');
+      }
+
+      await ownPage.goto(url, { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 40000 
+      });
+      
+      await ownPage.waitForSelector('.a-price-whole', { timeout: 15000 });
+      const priceText = await ownPage.$eval('.a-price-whole', el => el.textContent.trim());
+      const price = priceText.replace(/[,$]/g, '');
+      
+      if (price && !isNaN(price)) {
+        return price;
+      }
+      
+      throw new Error('Precio no encontrado');
+    } catch (error) {
+      throw error;
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  },
+  
+  Ddtech: async (url) => {
+    try {
+      const response = await axios.get(url, { 
+        timeout: 15000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      const $ = cheerio.load(response.data);
+      // DDTECH usa comúnmente estas clases para el precio (actualizado para .price-box .price)
+      const priceText = $(".price-box .price, .product-info-price .price, .product-price, #form-p-price").first().text().trim();
+      return priceText.replace(/[$,]/g, '').split('.')[0];
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  Default: async (url) => {
+    try {
+      const response = await axios.get(url, { timeout: 15000 });
+      const $ = cheerio.load(response.data);
+      // Intenta encontrar selectores de precio genéricos
+      const priceText = $(".price, .product-price, [class*='price']").first().text().trim();
+      return priceText.replace(/[$,]/g, '').split('.')[0];
+    } catch (error) {
+      throw error;
+    }
+  },
+  
+  AmazonOldAxios: async (url) => {
     try {
       const response = await axios.get(url, {
+        timeout: 15000,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -138,7 +277,7 @@ const scrapingMethods = {
       throw new Error('Precio no encontrado');
       
     } catch (error) {
-      console.error(`Error en Amazon scraping: ${error.message}`);
+      console.error(`Error en Amazon scraping: ${error.message || error}`);
       throw error;
     }
   }
@@ -155,43 +294,54 @@ const normalizarNombreTienda = (tienda) => {
     'aliexpress': 'Aliexpress',
     'amazon': 'Amazon',
     'amazon.com.mx': 'Amazon',
-    'amazon.mx': 'Amazon'
+    'amazon.mx': 'Amazon',
+    'ddtech': 'Ddtech',
+    'DDTECH': 'Ddtech'
   };
 
   return mapeoTiendas[tiendaNormalizada] || tienda;
 };
 
-// Función para procesar tiendas que usan Axios (como Cyberpuerta)
-async function procesarConAxios(items, tienda, conn) {
-  const batchSize = 5; // Procesar en lotes pequeños
+// Función de concurrencia de "ventana deslizante" (mucho más rápida que los lotes fijos)
+async function procesarConLimite(items, tienda, limite = 15) {
+  const activePromises = new Set();
   
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const promises = batch.map(async (componente) => {
+  for (const componente of items) {
+    // Si alcanzamos el límite, esperamos a que al menos una termine
+    if (activePromises.size >= limite) {
+      await Promise.race(activePromises);
+    }
+
+    const promise = (async () => {
       try {
         const price = await scrapingMethods[tienda](componente.url);
-        
         if (price && !isNaN(price)) {
           const updateQuery = 'UPDATE componentes SET precio = ? WHERE id = ?';
-          await queryAsync(conn, updateQuery, [price, componente.id]);
+          await queryAsync(updateQuery, [price, componente.id]);
           console.log(`[${componente.id}] ID: ${componente.id} (${tienda}) actualizado. Precio: ${price}`);
         }
       } catch (error) {
-        console.error(`Error procesando componente ${componente.id}:`, error.message);
+        console.error(`Error procesando componente ${componente.id}:`, error.message || error.code || error);
       }
-    });
+    })();
+
+    activePromises.add(promise);
+    // Limpiar el SET cuando la promesa termine
+    promise.finally(() => activePromises.delete(promise));
     
-    await Promise.all(promises);
-    // Pequeña pausa entre lotes para evitar sobrecarga
-    await new Promise(r => setTimeout(r, 1000));
+    // Pequeño delay de 50ms para no saturar el stack de red instantáneamente
+    await new Promise(r => setTimeout(r, 50));
   }
+
+  // Esperar a que terminen las últimas
+  await Promise.all(activePromises);
 }
 
 // Función para procesar tiendas que usan Puppeteer
-async function procesarConCluster(items, tienda, conn) {
+async function procesarConCluster(items, tienda) {
   const cluster = await Cluster.launch({
-    concurrency: Cluster.CONCURRENCY_CONTEXT,
-    maxConcurrency: tienda === 'Amazon' ? 2 : 3,
+    concurrency: Cluster.CONCURRENCY_BROWSER,
+    maxConcurrency: 5, // Bajado a 5 para mayor estabilidad
     puppeteerOptions: {
       headless: "new",
       args: [
@@ -199,23 +349,26 @@ async function procesarConCluster(items, tienda, conn) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1920,1080'
       ]
     },
-    timeout: tienda === 'Amazon' ? 30000 : 15000
+    timeout: 90000 // Tiempo total de tarea aumentado
   });
 
   await cluster.task(async ({ page, data: componente }) => {
     try {
-      const price = await scrapingMethods[tienda](componente.url);
+      // Pasamos la página del cluster al método de scraping para reutilizar el navegador
+      const price = await scrapingMethods[tienda](componente.url, page);
       
       if (price && !isNaN(price)) {
         const updateQuery = 'UPDATE componentes SET precio = ? WHERE id = ?';
-        await queryAsync(conn, updateQuery, [price, componente.id]);
+        await queryAsync(updateQuery, [price, componente.id]);
         console.log(`[${componente.id}] ID: ${componente.id} (${tienda}) actualizado. Precio: ${price}`);
       }
     } catch (error) {
-      console.error(`Error procesando componente ${componente.id}:`, error.message);
+      console.error(`Error procesando componente ${componente.id}:`, error.message || error.code || error);
     }
   });
 
@@ -228,10 +381,10 @@ async function procesarConCluster(items, tienda, conn) {
 }
 
 // Función principal actualizarPrecios
-async function actualizarPrecios(conn) {
+async function actualizarPrecios() {
   try {
     const query = 'SELECT id, url, tienda, precio FROM componentes';
-    const componentes = await queryAsync(conn, query);
+    const componentes = await queryAsync(query);
     console.log("Número de registros obtenidos: ", componentes.length);
 
     const componentesPorTienda = componentes.reduce((acc, comp) => {
@@ -241,28 +394,63 @@ async function actualizarPrecios(conn) {
       return acc;
     }, {});
 
-    for (const [tienda, items] of Object.entries(componentesPorTienda)) {
-      console.log(`Procesando tienda: ${tienda} (${items.length} items)`);
+    // Procesar tiendas en paralelo con inicio escalonado (staggered)
+    const storePromises = Object.entries(componentesPorTienda).map(async ([tienda, items], index) => {
+      // Esperar un poco antes de iniciar cada tienda para no saturar al arranque
+      await new Promise(r => setTimeout(r, index * 2000));
       
-      if (tienda === 'Amazon') {
-        await procesarConAxios(items, tienda, conn);
-      } else if (['Pcel', 'Aliexpress'].includes(tienda)) {
-        await procesarConCluster(items, tienda, conn);
-      } else if (tienda === 'Cyberpuerta') {
-        await procesarConAxios(items, tienda, conn);
+      console.log(`Iniciando procesamiento de tienda: ${tienda} (${items.length} items)`);
+      
+      try {
+        if (['Amazon', 'Pcel', 'Aliexpress', 'Cyberpuerta'].includes(tienda)) {
+          await procesarConCluster(items, tienda);
+        } else if (scrapingMethods[tienda]) {
+          // Si existe el método pero no es Puppeteer (ej. Ddtech)
+          await procesarConLimite(items, tienda, 10);
+        } else {
+          // Fallback para tiendas sin método definido
+          console.log(`Tienda ${tienda} no tiene método específico, usando scraper genérico...`);
+          await procesarConLimite(items, 'Default', 5);
+        }
+      } catch (error) {
+        console.error(`Error procesando tienda ${tienda}:`, error.message);
       }
-    }
+      
+      console.log(`Finalizado procesamiento de tienda: ${tienda}`);
+    });
+
+    await Promise.all(storePromises);
   } catch (error) {
     console.error("Error en el proceso principal:", error);
   }
 }
 
 // Iniciar el proceso
-connection.connect(async (error) => {
-  if (error) {
-    console.error("Error al conectar a la base de datos:", error);
-    return;
+(async () => {
+  console.log("Iniciando conexión a la base de datos...");
+  try {
+    // Al usar pool, no necesitamos llamar a .connect() manualmente,
+    // pero podemos hacer una consulta de prueba para verificar la conexión.
+    await queryAsync('SELECT 1');
+    console.log("Conexión exitosa a la base de datos");
+    
+    await actualizarPrecios();
+    console.log("Proceso de actualización completado exitosamente.");
+  } catch (err) {
+    console.error("Error crítico durante el proceso:", err);
+  } finally {
+    console.log("Cerrando recursos y base de datos...");
+    try {
+      await new Promise((resolve) => {
+        pool.end(() => {
+          console.log("Conexión a base de datos cerrada.");
+          resolve();
+        });
+      });
+    } catch (e) {
+      console.error("Error cerrando el pool:", e);
+    }
+    console.log("¡Hecho!");
+    process.exit(0);
   }
-  console.log("Conexión exitosa a la base de datos");
-  await actualizarPrecios(connection);
-});
+})();
