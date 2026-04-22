@@ -34,11 +34,21 @@ const scrapingMethods = {
     
     try {
       if (!ownPage) {
-        browser = await puppeteer.launch({
-          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
+        const launchOptions = {
           headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        };
+        
+        // Solo agregar executablePath si está definido en .env
+        if (process.env.CHROME_PATH) {
+          launchOptions.executablePath = process.env.CHROME_PATH;
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
         ownPage = await browser.newPage();
       }
       
@@ -54,8 +64,8 @@ const scrapingMethods = {
         timeout: 45000 
       });
       
-      // Selectores comunes para precio en Cyberpuerta (incluyendo el nuevo formato de h2)
-      const priceSelector = '.priceText, span.price, .detailsInfo .price, h2.cp-text--heading-1';
+      // Selectores comunes para precio en Cyberpuerta (incluyendo los nuevos formatos)
+      const priceSelector = '.priceText, span.price, .detailsInfo .price, h2.cp-text--heading-1, h2.cpd-text--heading-1, .cp-price, .cpd-price';
       await ownPage.waitForSelector(priceSelector, { timeout: 20000 });
       
       const priceText = await ownPage.$eval(priceSelector, el => el.textContent.trim());
@@ -77,11 +87,20 @@ const scrapingMethods = {
     
     try {
       if (!ownPage) {
-        browser = await puppeteer.launch({
-          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
+        const launchOptions = {
           headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        };
+        
+        if (process.env.CHROME_PATH) {
+          launchOptions.executablePath = process.env.CHROME_PATH;
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
         ownPage = await browser.newPage();
       }
       
@@ -134,11 +153,20 @@ const scrapingMethods = {
     
     try {
       if (!ownPage) {
-        browser = await puppeteer.launch({
-          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
+        const launchOptions = {
           headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        };
+        
+        if (process.env.CHROME_PATH) {
+          launchOptions.executablePath = process.env.CHROME_PATH;
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
         ownPage = await browser.newPage();
       }
       
@@ -192,11 +220,20 @@ const scrapingMethods = {
     
     try {
       if (!ownPage) {
-        browser = await puppeteer.launch({
-          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
+        const launchOptions = {
           headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        };
+        
+        if (process.env.CHROME_PATH) {
+          launchOptions.executablePath = process.env.CHROME_PATH;
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
         ownPage = await browser.newPage();
       }
       
@@ -236,11 +273,20 @@ const scrapingMethods = {
     
     try {
       if (!ownPage) {
-        browser = await puppeteer.launch({
-          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
+        const launchOptions = {
           headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        };
+        
+        if (process.env.CHROME_PATH) {
+          launchOptions.executablePath = process.env.CHROME_PATH;
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
         ownPage = await browser.newPage();
       }
       
@@ -369,22 +415,27 @@ async function procesarConLimite(items, tienda, limite = 15) {
 
 // Función para procesar tiendas que usan Puppeteer
 async function procesarConCluster(items, tienda) {
+  const launchOptions = {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1280,720' // Tamaño reducido para menor consumo
+    ]
+  };
+
+  if (process.env.CHROME_PATH) {
+    launchOptions.executablePath = process.env.CHROME_PATH;
+  }
+
   const cluster = await Cluster.launch({
     concurrency: Cluster.CONCURRENCY_PAGE, // Usar pestañas en lugar de procesos independientes para ahorrar CPU/RAM
     maxConcurrency: 2, // Reducido a 2 para proteger el hardware (ideal para N95/MiniPCs)
-    puppeteerOptions: {
-      executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--disable-blink-features=AutomationControlled',
-        '--window-size=1280,720' // Tamaño reducido para menor consumo
-      ]
-    },
+    puppeteerOptions: launchOptions,
     timeout: 120000 
   });
 
