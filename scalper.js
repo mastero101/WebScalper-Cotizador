@@ -460,16 +460,29 @@ async function procesarConCluster(items, tienda) {
     launchOptions.executablePath = process.env.CHROME_PATH;
   }
 
+  // Para Cyberpuerta en VPS, la concurrencia 1 es mucho más segura contra Cloudflare
+  const maxConcurrency = (tienda === 'Cyberpuerta') ? 1 : 2;
+
   const cluster = await Cluster.launch({
-    concurrency: Cluster.CONCURRENCY_PAGE, // Usar pestañas en lugar de procesos independientes para ahorrar CPU/RAM
-    maxConcurrency: 2, // Reducido a 2 para proteger el hardware (ideal para N95/MiniPCs)
+    concurrency: Cluster.CONCURRENCY_PAGE,
+    maxConcurrency: maxConcurrency, 
     puppeteerOptions: launchOptions,
-    timeout: 120000 
+    timeout: 150000 
   });
 
+  // Si es Cyberpuerta, hacer un "warm up" (visitar home para obtener cookies)
+  if (tienda === 'Cyberpuerta') {
+    await cluster.execute('https://www.cyberpuerta.mx/', async ({ page }) => {
+      console.log("[Cyberpuerta] Realizando 'warm-up' en el home...");
+      await page.goto('https://www.cyberpuerta.mx/', { waitUntil: 'networkidle2', timeout: 60000 });
+      await new Promise(r => setTimeout(r, 2000));
+    });
+  }
+
   await cluster.task(async ({ page, data: componente }) => {
-    // Pequeño respiro entre tareas para no estresar el CPU
-    await new Promise(r => setTimeout(r, 500));
+    // Delay aleatorio entre 2 y 5 segundos para parecer más humano
+    const delay = Math.floor(Math.random() * 3000) + 2000;
+    await new Promise(r => setTimeout(r, delay));
     
     try {
       // Pasamos la página del cluster al método de scraping para reutilizar el navegador
