@@ -14,6 +14,7 @@ try {
   puppeteer = require('puppeteer');
 }
 const { Cluster } = require('puppeteer-cluster');
+const os = require('os');
 
 // Configurar el pool de conexión a la base de datos para mejor rendimiento
 const pool = mysql.createPool({
@@ -62,8 +63,33 @@ const scrapingMethods = {
         ownPage = await browser.newPage();
       }
       
-      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setViewport({ 
+        width: 1280 + Math.floor(Math.random() * 50), 
+        height: 720 + Math.floor(Math.random() * 50) 
+      });
+      
+      await ownPage.setExtraHTTPHeaders({
+        'Accept-Language': 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+      });
+
       await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      
+      // Ahorro de recursos: Bloquear imágenes y fuentes
+      try { await ownPage.setRequestInterception(true); } catch (e) {}
+      const requestHandler = (req) => {
+        if (['image', 'font', 'media'].includes(req.resourceType())) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      };
+      ownPage.on('request', requestHandler);
       
       if (!url || typeof url !== 'string' || !url.startsWith('http')) {
         throw new Error('URL inválida o vacía');
@@ -131,7 +157,7 @@ const scrapingMethods = {
         ownPage = await browser.newPage();
       }
       
-      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setViewport({ width: 1280, height: 720 });
       await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       // Solo habilitar si no estaba habilitado antes (evitar errores de doble activación)
@@ -197,7 +223,7 @@ const scrapingMethods = {
         ownPage = await browser.newPage();
       }
       
-      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setViewport({ width: 1280, height: 720 });
       await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       try { await ownPage.setRequestInterception(true); } catch (e) {}
@@ -264,7 +290,7 @@ const scrapingMethods = {
         ownPage = await browser.newPage();
       }
       
-      await ownPage.setViewport({ width: 1920, height: 1080 });
+      await ownPage.setViewport({ width: 1280, height: 720 });
       await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       if (!url || typeof url !== 'string' || !url.startsWith('http')) {
@@ -406,7 +432,7 @@ const normalizarNombreTienda = (tienda) => {
 };
 
 // Función de concurrencia de "ventana deslizante" (mucho más rápida que los lotes fijos)
-async function procesarConLimite(items, tienda, limite = 15) {
+async function procesarConLimite(items, tienda, limite = process.env.CONCURRENCY || 15) {
   const activePromises = new Set();
   
   for (const componente of items) {
@@ -460,8 +486,9 @@ async function procesarConCluster(items, tienda) {
     launchOptions.executablePath = process.env.CHROME_PATH;
   }
 
-  // Para Cyberpuerta en VPS, la concurrencia 1 es mucho más segura contra Cloudflare
-  const maxConcurrency = (tienda === 'Cyberpuerta') ? 1 : 2;
+  // Priorizar el valor de .env, pero mantener Cyberpuerta en 1 por defecto si no se especifica
+  const envConcurrency = parseInt(process.env.CONCURRENCY) || 2;
+  const maxConcurrency = (tienda === 'Cyberpuerta' && !process.env.CONCURRENCY) ? 1 : envConcurrency;
 
   const cluster = await Cluster.launch({
     concurrency: Cluster.CONCURRENCY_PAGE,
@@ -522,6 +549,19 @@ async function actualizarPrecios() {
 
     // Procesar tiendas de forma SECUENCIAL para no sobrecalentar el CPU
     for (const [tienda, items] of Object.entries(componentesPorTienda)) {
+      
+      // --- PROTECCIÓN TÉRMICA ---
+      const thermalLimit = parseFloat(process.env.THERMAL_LIMIT) || 0.8; // 80% de carga por defecto
+      const cpuCount = os.cpus().length;
+      let load = os.loadavg()[0] / cpuCount;
+      
+      if (load > thermalLimit) {
+        console.log(`\n[PROTECCIÓN TÉRMICA] Carga CPU alta (${(load*100).toFixed(1)}%). Esperando 30s a que enfríe...`);
+        await new Promise(r => setTimeout(r, 30000));
+        // Volver a medir después del descanso
+        load = os.loadavg()[0] / cpuCount;
+      }
+
       console.log(`\n--- Iniciando procesamiento de tienda: ${tienda} (${items.length} items) ---`);
       
       try {
@@ -540,8 +580,8 @@ async function actualizarPrecios() {
       }
       
       console.log(`Finalizado procesamiento de tienda: ${tienda}`);
-      // Esperar 3 segundos entre tiendas para que el CPU se enfríe
-      await new Promise(r => setTimeout(r, 3000));
+      // Esperar 10 segundos entre tiendas para que el CPU se enfríe (Protección Térmica)
+      await new Promise(r => setTimeout(r, 10000));
     }
   } catch (error) {
     console.error("Error en el proceso principal:", error);
