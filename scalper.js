@@ -35,6 +35,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
+          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
           headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
@@ -77,6 +78,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
+          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
           headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
@@ -133,6 +135,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
+          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
           headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
@@ -190,6 +193,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
+          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
           headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
@@ -233,6 +237,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
+          executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
           headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
@@ -368,6 +373,7 @@ async function procesarConCluster(items, tienda) {
     concurrency: Cluster.CONCURRENCY_PAGE, // Usar pestañas en lugar de procesos independientes para ahorrar CPU/RAM
     maxConcurrency: 2, // Reducido a 2 para proteger el hardware (ideal para N95/MiniPCs)
     puppeteerOptions: {
+      executablePath: process.env.CHROME_PATH || '/usr/bin/chromium-browser',
       headless: true,
       args: [
         '--no-sandbox',
