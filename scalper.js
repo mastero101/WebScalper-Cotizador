@@ -2,7 +2,17 @@ require('dotenv').config();
 const mysql = require("mysql");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const puppeteer = require('puppeteer');
+let puppeteer;
+try {
+  // Intentar usar puppeteer-extra con stealth si está instalado
+  const puppeteerExtra = require('puppeteer-extra');
+  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  puppeteerExtra.use(StealthPlugin());
+  puppeteer = puppeteerExtra;
+} catch (e) {
+  // Fallback al puppeteer estándar si no están los plugins
+  puppeteer = require('puppeteer');
+}
 const { Cluster } = require('puppeteer-cluster');
 
 // Configurar el pool de conexión a la base de datos para mejor rendimiento
@@ -53,15 +63,15 @@ const scrapingMethods = {
       }
       
       await ownPage.setViewport({ width: 1920, height: 1080 });
-      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       if (!url || typeof url !== 'string' || !url.startsWith('http')) {
         throw new Error('URL inválida o vacía');
       }
 
       await ownPage.goto(url, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 45000 
+        waitUntil: 'networkidle2', 
+        timeout: 60000 
       });
       
       // Selectores comunes para precio en Cyberpuerta (incluyendo los nuevos formatos)
@@ -73,6 +83,8 @@ const scrapingMethods = {
       
       return price;
     } catch (error) {
+      const title = ownPage ? await ownPage.title().catch(() => 'N/A') : 'N/A';
+      console.error(`Error procesando componente Cyberpuerta: ${error.message} | Page Title: ${title}`);
       throw error;
     } finally {
       if (browser) {
@@ -105,7 +117,7 @@ const scrapingMethods = {
       }
       
       await ownPage.setViewport({ width: 1920, height: 1080 });
-      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       // Solo habilitar si no estaba habilitado antes (evitar errores de doble activación)
       try { await ownPage.setRequestInterception(true); } catch (e) {}
@@ -171,7 +183,7 @@ const scrapingMethods = {
       }
       
       await ownPage.setViewport({ width: 1920, height: 1080 });
-      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       try { await ownPage.setRequestInterception(true); } catch (e) {}
       
@@ -238,7 +250,7 @@ const scrapingMethods = {
       }
       
       await ownPage.setViewport({ width: 1920, height: 1080 });
-      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await ownPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
       
       if (!url || typeof url !== 'string' || !url.startsWith('http')) {
         throw new Error('URL inválida o vacía');
@@ -298,8 +310,8 @@ const scrapingMethods = {
       }
 
       await ownPage.goto(url, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 45000 
+        waitUntil: 'networkidle2', 
+        timeout: 60000 
       });
       
       // Selector actualizado para DDtech basado en feedback
@@ -424,7 +436,8 @@ async function procesarConCluster(items, tienda) {
       '--disable-accelerated-2d-canvas',
       '--disable-gpu',
       '--disable-blink-features=AutomationControlled',
-      '--window-size=1280,720' // Tamaño reducido para menor consumo
+      '--window-size=1280,720',
+      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ]
   };
 
