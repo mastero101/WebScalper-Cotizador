@@ -15,6 +15,18 @@ try {
 }
 const { Cluster } = require('puppeteer-cluster');
 const os = require('os');
+const fs = require('fs');
+
+// Función para obtener temperatura del CPU (Linux)
+const getCpuTemp = () => {
+  try {
+    // Intentar leer la zona térmica 0 (común en Ubuntu/Debian)
+    const temp = fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8');
+    return parseInt(temp) / 1000;
+  } catch (e) {
+    return null; // Fallback si no es Linux o no hay sensores
+  }
+};
 
 // Configurar el pool de conexión a la base de datos para mejor rendimiento
 const pool = mysql.createPool({
@@ -551,15 +563,19 @@ async function actualizarPrecios() {
     for (const [tienda, items] of Object.entries(componentesPorTienda)) {
       
       // --- PROTECCIÓN TÉRMICA ---
-      const thermalLimit = parseFloat(process.env.THERMAL_LIMIT) || 0.8; // 80% de carga por defecto
+      const thermalLimit = parseFloat(process.env.THERMAL_LIMIT) || 0.8;
+      const tempLimit = parseInt(process.env.TEMP_LIMIT) || 75; // 75°C por defecto
+      
       const cpuCount = os.cpus().length;
       let load = os.loadavg()[0] / cpuCount;
+      let temp = getCpuTemp();
       
-      if (load > thermalLimit) {
+      if (temp !== null && temp > tempLimit) {
+        console.log(`\n[PROTECCIÓN TÉRMICA] Temperatura alta (${temp.toFixed(1)}°C). Esperando 45s a que enfríe...`);
+        await new Promise(r => setTimeout(r, 45000));
+      } else if (load > thermalLimit) {
         console.log(`\n[PROTECCIÓN TÉRMICA] Carga CPU alta (${(load*100).toFixed(1)}%). Esperando 30s a que enfríe...`);
         await new Promise(r => setTimeout(r, 30000));
-        // Volver a medir después del descanso
-        load = os.loadavg()[0] / cpuCount;
       }
 
       console.log(`\n--- Iniciando procesamiento de tienda: ${tienda} (${items.length} items) ---`);
