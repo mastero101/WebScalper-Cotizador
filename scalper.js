@@ -35,7 +35,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
-          headless: "new",
+          headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         ownPage = await browser.newPage();
@@ -77,7 +77,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
-          headless: "new",
+          headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         ownPage = await browser.newPage();
@@ -133,7 +133,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
-          headless: "new",
+          headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         ownPage = await browser.newPage();
@@ -190,7 +190,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
-          headless: "new",
+          headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         ownPage = await browser.newPage();
@@ -233,7 +233,7 @@ const scrapingMethods = {
     try {
       if (!ownPage) {
         browser = await puppeteer.launch({
-          headless: "new",
+          headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         ownPage = await browser.newPage();
@@ -368,7 +368,7 @@ async function procesarConCluster(items, tienda) {
     concurrency: Cluster.CONCURRENCY_PAGE, // Usar pestañas en lugar de procesos independientes para ahorrar CPU/RAM
     maxConcurrency: 2, // Reducido a 2 para proteger el hardware (ideal para N95/MiniPCs)
     puppeteerOptions: {
-      headless: "new",
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
