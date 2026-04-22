@@ -73,6 +73,21 @@ const scrapingMethods = {
         waitUntil: 'networkidle2', 
         timeout: 60000 
       });
+
+      // Detectar y esperar a Cloudflare si es necesario
+      let title = await ownPage.title();
+      if (title.includes('Just a moment')) {
+        console.log(`[Cyberpuerta] Detectado Cloudflare en ${url}. Esperando validación...`);
+        // Esperar hasta 15 segundos a que el título cambie o el selector aparezca
+        try {
+          await ownPage.waitForFunction(
+            () => !document.title.includes('Just a moment'),
+            { timeout: 15000 }
+          );
+        } catch (e) {
+          console.log('[Cyberpuerta] Timeout esperando a que Cloudflare desaparezca.');
+        }
+      }
       
       // Selectores comunes para precio en Cyberpuerta (incluyendo los nuevos formatos)
       const priceSelector = '.priceText, span.price, .detailsInfo .price, h2.cp-text--heading-1, h2.cpd-text--heading-1, .cp-price, .cpd-price';
